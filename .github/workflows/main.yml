@@ -8,30 +8,25 @@ on:
 env:
   DOTNET_VERSION: '3.1.404'
 
-
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v2
 
-      # Checkout the repo
-      - uses: actions/checkout@master
-
-      # Setup .NET Core SDK
       - name: Setup .NET Core
         uses: actions/setup-dotnet@v1
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      # Run dotnet build and publish
-      - name: dotnet build and publish
+      - name: Dotnet build and publish
         working-directory: 'app'
         run: |
           dotnet restore
           dotnet build --configuration Release
-          dotnet publish -c Release -o './published-app'          
+          dotnet publish -c Release -o './published-app'
 
-      # Publish artifact
       - name: Publish artifact
         uses: actions/upload-artifact@v2
         with:
@@ -39,20 +34,17 @@ jobs:
           path: './app/published-app'
 
   deploy-dev:
-    runs-on: 'ubuntu-latest'
+    runs-on: ubuntu-latest
     environment: 'dev'
     needs: build-and-publish
     steps:
-
-      # Download published artifact
-      - name: Download artifact
+      - name: Download published artifact
         uses: actions/download-artifact@v2
         with:
           name: published-app
           path: './published-app'
 
-      # Deploy to web app
-      - name: Deploy to Azure WebApp
+      - name: Deploy to Azure WebApp (Dev)
         uses: azure/webapps-deploy@v2
         with:
           app-name: app-cloudlumberjack-dev
@@ -60,22 +52,25 @@ jobs:
           package: './published-app'
 
   deploy-prod:
-    runs-on: 'ubuntu-latest'
+    runs-on: ubuntu-latest
     environment: 'prod'
     needs: [build-and-publish, deploy-dev]
     steps:
-
-      # Download published artifact
-      - name: Download artifact
-        uses: actions/download-artifact@v2
+      - name: Review and approval
+        uses: actions/github-script@v6
         with:
-          name: published-app
-          path: './published-app'
-
-      # Deploy to web app
-      - name: Deploy to Azure WebApp
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: app-cloudlumberjack-prod
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: './published-app'
+          github-token: ${{ github.GH_SANTORO_TOKEN }}
+          script: |
+            const { data } = await github.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const job = data.jobs.find((job) => job.name === 'deploy-prod');
+            if (job.conclusion === 'success') {
+              core.info('The deployment to dev was successful. You can now approve deploying to prod.');
+            } else {
+              core.setFailed('The deployment to dev failed. You cannot approve deploying to prod.');
+            }
+        env:
+          GITHUB_TOKEN: ${{ github.GH_SANTORO_TOKEN }}
